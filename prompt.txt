@@ -1,0 +1,1 @@
+"Summarize the following text briefly in the same language. Include only the main arguments, without additional formatting or explanations."
