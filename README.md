@@ -11,6 +11,14 @@ Integrates Google Cloud Speech-to-Text, Google Cloud Storage, Cohere.ai (for sum
 2. [Features](#features)  
 3. [Tech Stack & Dependencies](#tech-stack--dependencies)  
 4. [Database Schema](#database-schema)  
+5. [Installation](#installation)  
+6. [Configuration & Environment Variables](#configuration--environment-variables)  
+7. [Available Scripts](#available-scripts)  
+8. [API Endpoints](#api-endpoints)  
+9. [Usage Examples](#usage-examples)  
+10. [Troubleshooting](#troubleshooting)  
+11. [Contributing](#contributing)  
+12. [License](#license)
 
 ---
 
