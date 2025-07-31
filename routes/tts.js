@@ -30,7 +30,7 @@ async function uploadAndSign(buffer, fileName) {
   const [url] = await file.getSignedUrl({
     version: 'v4',
     action: 'read',
-    expires: Date.now() + 60 * 60 * 1000,
+    expires: Date.now() + 7 * 24 * 60 * 60 * 1000,
   })
 
   return url
