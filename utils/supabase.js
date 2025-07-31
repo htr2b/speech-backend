@@ -101,20 +101,21 @@ export async function saveTranscript(user_id, transcript, gcsUri, title) {
 
 
 // 3. Özet verisini ekle
-export async function saveSummary(user_id, summaryText) {
+export async function saveSummary(transcriptId, summaryText) {
+    console.log('saveSummary çağrıldı:', { transcriptId, summaryLength: summaryText.length })
+
     const { data, error } = await supabase
         .from('transcripts')
         .update({ summary: summaryText })
-        .eq('user_id', user_id)
-        .order('created_at', { ascending: false })
-        .limit(1)
+        .eq('id', transcriptId)
         .select()
 
     if (error) {
         console.error('Özet kaydedilemedi:', error)
-        throw new Error('Özet kaydedilemedi')
+        throw new Error('Özet kaydedilemedi: ' + error.message)
     }
 
+    console.log('Summary başarıyla kaydedildi:', data)
     return data
 }
 

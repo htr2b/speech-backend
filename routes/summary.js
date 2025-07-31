@@ -60,30 +60,79 @@ export async function generateShortTitle(transcipt) {
         .replace(/[.,:;!?'"*]/g, '')       // başlık içindeki tüm noktalama işaretlerini sil
         .replace(/[\s"'*.,:;!?-]+$/, '')   // sondaki boşluk ve noktalama işaretlerini sil
         .trim()
-
 }
 
-
-// 4) GET /summary → en güncel input.txt’i oku , özetle, hem JSON dön hem de output.txt’e yaz
+// 4) GET /summary → en güncel input.txt'i oku , özetle, hem JSON dön hem de output.txt'e yaz
 router.get('/', verifyToken, requireRole('pro'), async (req, res, next) => {
     try {
-        // 4.1) input ve prompt’u her istekte okuyun
-        const [inputText, prompt] = await Promise.all([
-            fs.readFile(INPUT_FILE, 'utf8'),
-            fs.readFile(PROMPT_FILE, 'utf8')
-        ])
+        // İlk önce transcript ID'sini al
+        const transcriptId = req.query.transcript_id
+        console.log('Gelen transcript_id:', transcriptId)
 
-        if (!inputText.trim()) {
-            return res
-                .status(400)
-                .json({ status: 'error', message: 'input.txt boş.' })
+        if (!transcriptId) {
+            return res.status(400).json({ error: 'transcript_id gerekli' })
         }
 
-        // 4.2) cümlelere böl ve 100 kelimelik parçalara ayır
-        const sentences = nlp(inputText).sentences().out('array')
+        // Kullanıcıyı bul
+        const { data: foundUser, error: userError } = await supabase
+            .from('users')
+            .select('id')
+            .eq('auth_user_id', req.user.id)
+            .single()
+
+        if (userError || !foundUser) {
+            console.log('User not found:', userError)
+            return res.status(404).json({ error: 'User not found' })
+        }
+
+        console.log("USER", foundUser)
+
+        // Bu transcript'in bu kullanıcıya ait olduğunu kontrol et
+        console.log('Kullanıcı ID:', foundUser.id, 'Transcript ID:', transcriptId)
+        const { data: transcript, error: transcriptError } = await supabase
+            .from('transcripts')
+            .select('id, user_id')
+            .eq('id', transcriptId)
+            .eq('user_id', foundUser.id)
+            .single()
+
+        console.log('Transcript sorgu sonucu:', { transcript, transcriptError })
+
+        if (transcriptError || !transcript) {
+            console.log('Transcript not found or not owned by user:', transcriptError)
+            return res.status(404).json({ error: 'Transcript bulunamadı' })
+        }
+
+        // Aktif transcript'i al
+        const { data: currentTranscript, error: fetchError } = await supabase
+            .from('transcripts')
+            .select('transcript')
+            .eq('id', transcriptId)
+            .single()
+
+        if (fetchError || !currentTranscript?.transcript) {
+            return res.status(404).json({ error: 'Transcript content bulunamadı' })
+        }
+
+        console.log('Aktif transcript:', currentTranscript.transcript.substring(0, 100) + '...')
+
+        // Aktif transcript'i input.txt'ye yaz
+        await fs.writeFile(INPUT_FILE, currentTranscript.transcript, 'utf8')
+
+        // Prompt'u oku
+        const prompt = await fs.readFile(PROMPT_FILE, 'utf8')
+
+        console.log('Input file yazıldı, uzunluk:', currentTranscript.transcript.length)
+
+        // cümlelere böl ve 100 kelimelik parçalara ayır
+        const sentences = nlp(currentTranscript.transcript).sentences().out('array')
         const chunks = chunkText(sentences, 100)
 
-        // 4.3) Cohere chat çağrısı
+        console.log('Sentences count:', sentences.length, 'Chunks count:', chunks.length)
+
+        // Cohere chat çağrısı
+        console.log('Cohere\'ye gönderilen text preview:', chunks.join("\n\n").substring(0, 200) + '...')
+
         const response = await cohere.chat({
             model: 'command-a-03-2025',
             messages: [{
@@ -92,47 +141,39 @@ router.get('/', verifyToken, requireRole('pro'), async (req, res, next) => {
             }]
         })
 
-        // 4.4) API yanıtından özet metnini çek
-        // CohereClientV2 chat API'sı, choices dizisi yerine message.content içinde de olabilir:
+        // API yanıtından özet metnini çek
         const summaryText = (
             response.choices?.[0]?.message?.content
             || response.message?.content?.[0]?.text
             || ''
         ).trim()
 
-        const shortTitle = await generateShortTitle(summaryText)
+        console.log('Cohere response preview:', summaryText.substring(0, 200) + '...')
+
+        const shortTitle = await generateShortTitle(currentTranscript.transcript)
         console.log('Short Title:', shortTitle)
 
-        // 4.5) Özet metnini output.txt’e yaz (tek satıra sıkıştırılmış)
+        // Özet metnini output.txt'e yaz
         const normalized = summaryText
             .replace(/[\r\n]+/g, ' ')
             .replace(/\s+/g, ' ')
             .trim()
         await fs.writeFile(OUTPUT_FILE, normalized, 'utf8')
 
-        // req.user.id auth.users tablosundan geliği için kendi tablomuzdan çekecek şekilde düzenlemeliyiz
-        const { data: foundUser, error } = await supabase
-            .from('users')
-            .select('id', 'auth_user_id')
-            .eq('auth_user_id', req.user.id) // Eşleşen satıralra bakıyor
-            .single()
+        // Summary'yi kaydet
+        const saveResult = await saveSummary(transcriptId, summaryText)
 
-        if (!foundUser) {
-            return console.log('User not found')
-        } else if (error) {
-            return console.log('User not found')
-        }
-
-        console.log("USER", foundUser)
-
-        saveSummary(foundUser.id, summaryText)
-
-        // 4.6) İstemciye JSON ile dönün
-        res.json({ status: 'success', summary: summaryText, shortTitle })
+        // İstemciye JSON ile dönün
+        res.json({
+            status: 'success',
+            summary: summaryText,
+            shortTitle,
+            transcript_id: transcriptId
+        })
 
     } catch (err) {
         console.error('Summary route error:', err)
-        next(err)
+        res.status(500).json({ error: 'Summary generation failed' })
     }
 })
 
